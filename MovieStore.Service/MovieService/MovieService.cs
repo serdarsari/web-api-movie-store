@@ -63,24 +63,14 @@ namespace MovieStore.Service.MovieService
                     .Where(x => x.MovieId == movie.MovieId)
                     .Select(x => x.ActorId).ToListAsync();
 
-                List<string> actorsNames = new();
-                foreach (var actorId in actorsIds)
-                {
-                    var actor = await _context.Actors.SingleOrDefaultAsync(x => x.ActorId == actorId);
-                    actorsNames.Add($"{actor.FirstName} {actor.LastName}");
-                }
+                var actorsNames = await _context.Actors.Where(x => actorsIds.Contains(x.ActorId)).Select(x => $"{x.FirstName} {x.LastName}").ToListAsync();
 
                 var directorsIds = await _context.MovieDirectors
                     .Where(x => x.MovieId == movie.MovieId)
                     .Select(x => x.DirectorId).ToListAsync();
 
-                List<string> directorsNames = new();
-                foreach (var directorId in directorsIds)
-                {
-                    var director = await _context.Directors.SingleOrDefaultAsync(x => x.DirectorId == directorId);
-                    directorsNames.Add($"{director.FirstName} {director.LastName}");
-                }
-
+                var directorsNames = await _context.Directors.Where(x => directorsIds.Contains(x.DirectorId)).Select(x => $"{x.FirstName} {x.LastName}").ToListAsync();
+                
                 response.Actors = actorsNames;
                 response.Directors = directorsNames;
 

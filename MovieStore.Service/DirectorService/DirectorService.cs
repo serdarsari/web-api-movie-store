@@ -57,26 +57,13 @@ namespace MovieStore.Service.DirectorService
                         .Where(x => x.DirectorId == director.DirectorId)
                         .Select(x => x.MovieId).ToListAsync();
 
-                List<string> moviesNames = new();
-                foreach (var movieId in moviesIds)
-                {
-                    var movie = await _context.Movies.SingleOrDefaultAsync(x => x.MovieId == movieId);
-                    if (movie is not null)
-                        moviesNames.Add(movie.Name);
-                }
-
+                var moviesNames = await _context.Movies.Where(x => moviesIds.Contains(x.MovieId)).Select(x => x.Name).ToListAsync();
 
                 var awardsIds = await _context.DirectorAwardWinners
                         .Where(x => x.DirectorId == director.DirectorId)
                         .Select(x => x.AwardId).ToListAsync();
 
-                List<string> awardsNames = new();
-                foreach (var awardId in awardsIds)
-                {
-                    var award = await _context.Awards.SingleOrDefaultAsync(x => x.AwardId == awardId);
-                    if (award is not null)
-                        awardsNames.Add(award.Name);
-                }
+                var awardsNames = await _context.Awards.Where(x => awardsIds.Contains(x.AwardId)).Select(x => x.Name).ToListAsync();
 
                 response.Awards = awardsNames;
                 response.Movies = moviesNames;
