@@ -18,5 +18,7 @@ namespace MovieStore.Entity
         public double Budget { get; set; }
         public double Rating { get; set; }
         public string Storyline { get; set; }
+        public IEnumerable<MovieActor> MovieActors { get; set; }
+        public IEnumerable<MovieDirector> MovieDirectors { get; set; }
     }
 }

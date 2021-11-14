@@ -13,5 +13,7 @@ namespace MovieStore.Entity
         public int AwardId { get; set; }
         public string Name { get; set; }
         public string Country { get; set; }
+        public IEnumerable<ActorAwardWinner> ActorAwardWinners { get; set; }
+        public IEnumerable<DirectorAwardWinner> DirectorAwardWinners { get; set; }
     }
 }
