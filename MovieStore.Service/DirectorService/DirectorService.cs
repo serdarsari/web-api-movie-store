@@ -1,11 +1,12 @@
 ﻿using AutoMapper;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using MovieStore.DTO.DirectorDTO;
 using MovieStore.Entity;
+using MovieStore.Service.Caching;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace MovieStore.Service.DirectorService
@@ -14,10 +15,13 @@ namespace MovieStore.Service.DirectorService
     {
         private readonly MovieStoreDbContext _context;
         private readonly IMapper _mapper;
-        public DirectorService(MovieStoreDbContext context, IMapper mapper)
+        private readonly CustomMemoryCache _memoryCache;
+
+        public DirectorService(MovieStoreDbContext context, IMapper mapper, CustomMemoryCache memoryCache)
         {
             _context = context;
             _mapper = mapper;
+            _memoryCache = memoryCache;
         }
 
         public async Task<GetDirectorsResponse> GetDirectorsAsync(GetDirectorsRequest request)
@@ -29,18 +33,40 @@ namespace MovieStore.Service.DirectorService
                 TotalDirectors = await _context.Directors.CountAsync(),
             };
 
-            var directors = await _context.Directors
+            if (!_memoryCache.Cache.TryGetValue("AllDirectors", out List<Director> allDirectors))
+            {
+                allDirectors = await _context.Directors.ToListAsync();
+
+                var cacheEntryOptions = new MemoryCacheEntryOptions()
+                    .SetAbsoluteExpiration(TimeSpan.FromHours(12))
+                    .SetPriority(CacheItemPriority.High)
+                    .SetSize(1)
+                    .RegisterPostEvictionCallback(AllDirectorsCallback, _memoryCache);
+
+                _memoryCache.Cache.Set("AllDirectors", allDirectors, cacheEntryOptions);
+            }
+
+            var directors = allDirectors
                 .Skip(currentStartRow)
                 .Take(request.PageSize)
                 .Select(m => new DirectorResponse
                 {
                     FullName = $"{m.FirstName} {m.LastName}",
                     Born = $"{m.DateOfBirth:MMMM} {m.DateOfBirth:dd}, {m.PlaceOfBirth}"
-                })
-                .ToListAsync();
+                }).ToList();
+
             response.Directors = directors;
 
             return response;
+        }
+        private static void AllDirectorsCallback(
+            object cacheKey, object cacheValue, EvictionReason evictionReason, object state)
+        {
+            var memoryCache = (CustomMemoryCache)state;
+
+            memoryCache.Cache.Set(
+                "AllDirectorsCallbackMessage",
+                $"Entry {cacheKey} was evicted: {evictionReason}.", new MemoryCacheEntryOptions { Size = 1 });
         }
 
         public async Task<GetDirectorDetailResponse> GetDirectorDetailAsync(int id)
@@ -141,6 +167,7 @@ namespace MovieStore.Service.DirectorService
                 }
 
                 transaction.Commit();       //Transaction Success
+                _memoryCache.Cache.Remove("AllDirectors");
 
                 return new CreateDirectorResponse
                 {

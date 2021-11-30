@@ -1,11 +1,12 @@
 ﻿using AutoMapper;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using MovieStore.DTO.ActorDTO;
 using MovieStore.Entity;
+using MovieStore.Service.Caching;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace MovieStore.Service.ActorService
@@ -14,11 +15,13 @@ namespace MovieStore.Service.ActorService
     {
         private readonly MovieStoreDbContext _context;
         private readonly IMapper _mapper;
+        private readonly CustomMemoryCache _memoryCache;
 
-        public ActorService(MovieStoreDbContext context, IMapper mapper)
+        public ActorService(MovieStoreDbContext context, IMapper mapper, CustomMemoryCache memoryCache)
         {
             _context = context;
             _mapper = mapper;
+            _memoryCache = memoryCache;
         }
 
         public async Task<GetActorsResponse> GetActorsAsync(GetActorsRequest request)
@@ -30,19 +33,43 @@ namespace MovieStore.Service.ActorService
                 TotalActors = await _context.Actors.CountAsync(),
             };
 
-            var actors = await _context.Actors
+            if (!_memoryCache.Cache.TryGetValue("AllActors", out List<Actor> allActors))
+            {
+                allActors = await _context.Actors.ToListAsync();
+
+                var cacheEntryOptions = new MemoryCacheEntryOptions()
+                    .SetAbsoluteExpiration(TimeSpan.FromHours(12))
+                    .SetPriority(CacheItemPriority.High)
+                    .SetSize(1)
+                    .RegisterPostEvictionCallback(AllActorsCallback, _memoryCache);
+
+                _memoryCache.Cache.Set("AllActors", allActors, cacheEntryOptions);
+            }
+
+            var actors = allActors
                 .Skip(currentStartRow)
                 .Take(request.PageSize)
                 .Select(m => new ActorResponse
                 {
                     FullName = $"{m.FirstName} {m.LastName}",
                     Born = $"{m.DateOfBirth:MMMM} {m.DateOfBirth:dd}, {m.PlaceOfBirth}"
-                })
-                .ToListAsync();
+                }).ToList();
+
             response.Actors = actors;
 
             return response;
         }
+        private static void AllActorsCallback(
+            object cacheKey, object cacheValue, EvictionReason evictionReason, object state)
+        {
+            var memoryCache = (CustomMemoryCache)state;
+
+            memoryCache.Cache.Set(
+                "AllActorsCallbackMessage",
+                $"Entry {cacheKey} was evicted: {evictionReason}.", new MemoryCacheEntryOptions { Size = 1 });  //SizeLimit verdiğim için, her Set ederken size belirtmek zorundayım.
+        }
+
+
 
         public async Task<GetActorDetailResponse> GetActorDetailAsync(int id)
         {
@@ -142,6 +169,8 @@ namespace MovieStore.Service.ActorService
                 }
 
                 transaction.Commit();       //Transaction Success
+                _memoryCache.Cache.Remove("AllActors");
+
 
                 return new CreateActorResponse
                 {
@@ -213,9 +242,9 @@ namespace MovieStore.Service.ActorService
                     };
                 }
 
-                actor.FirstName = request.FirstName != default ? request.FirstName : actor.FirstName;
-                actor.LastName = request.LastName != default ? request.LastName : actor.LastName;
-                actor.Biography = request.Biography != default ? request.Biography : actor.Biography;
+                actor.FirstName = request.FirstName != actor.FirstName ? request.FirstName : actor.FirstName;
+                actor.LastName = request.LastName != actor.LastName ? request.LastName : actor.LastName;
+                actor.Biography = request.Biography != actor.Biography ? request.Biography : actor.Biography;
 
                 await _context.SaveChangesAsync();
 

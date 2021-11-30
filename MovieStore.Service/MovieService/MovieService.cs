@@ -1,11 +1,12 @@
 ﻿using AutoMapper;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using MovieStore.DTO.MovieDTO;
 using MovieStore.Entity;
+using MovieStore.Service.Caching;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace MovieStore.Service.MovieService
@@ -14,11 +15,13 @@ namespace MovieStore.Service.MovieService
     {
         private readonly MovieStoreDbContext _context;
         private readonly IMapper _mapper;
+        private readonly CustomMemoryCache _memoryCache;
 
-        public MovieService(MovieStoreDbContext context, IMapper mapper)
+        public MovieService(MovieStoreDbContext context, IMapper mapper, CustomMemoryCache memoryCache)
         {
             _context = context;
             _mapper = mapper;
+            _memoryCache = memoryCache;
         }
 
         public async Task<GetMoviesResponse> GetMoviesAsync(GetMoviesRequest request)
@@ -30,7 +33,20 @@ namespace MovieStore.Service.MovieService
                 TotalMovies = await _context.Movies.CountAsync(),
             };
 
-            var movies = await _context.Movies
+            if (!_memoryCache.Cache.TryGetValue("AllMovies", out List<Movie> allMovies))
+            {
+                allMovies = await _context.Movies.ToListAsync();
+
+                var cacheEntryOptions = new MemoryCacheEntryOptions()
+                    .SetAbsoluteExpiration(TimeSpan.FromHours(12))
+                    .SetPriority(CacheItemPriority.High)
+                    .SetSize(1)
+                    .RegisterPostEvictionCallback(AllMoviesCallback, _memoryCache);
+
+                _memoryCache.Cache.Set("AllMovies", allMovies, cacheEntryOptions);
+            }
+
+            var movies = allMovies
                 .Skip(currentStartRow)
                 .Take(request.PageSize)
                 .Select(m => new MovieResponse
@@ -41,11 +57,20 @@ namespace MovieStore.Service.MovieService
                     Budget = m.Budget,
                     Rating = m.Rating,
                     Storyline = m.Storyline,
-                })
-                .ToListAsync();
+                }).ToList();
+
             response.Movies = movies;
 
             return response;
+        }
+        private static void AllMoviesCallback(
+           object cacheKey, object cacheValue, EvictionReason evictionReason, object state)
+        {
+            var memoryCache = (CustomMemoryCache)state;
+
+            memoryCache.Cache.Set(
+                "AllMoviesCallbackMessage",
+                $"Entry {cacheKey} was evicted: {evictionReason}.", new MemoryCacheEntryOptions { Size = 1 });
         }
 
         public async Task<GetMovieDetailResponse> GetMovieDetailAsync(int id)
@@ -157,6 +182,7 @@ namespace MovieStore.Service.MovieService
                 }
 
                 transaction.Commit();       //Transaction Success
+                _memoryCache.Cache.Remove("AllMovies");
 
                 return new CreateMovieResponse
                 {
